@@ -3,24 +3,33 @@ window.__ModuleLoader__.load({
   factory: (require) => {
     var module = { exports: {} };
     var exports = module.exports;
-    const React = require('react');
-    const { useState, useEffect, useRef } = React;
     const API = '/offpeak-guard/api';
+    const MARK = 'data-offpeak-btn';
 
-    function ensureStyle() {
-      try {
-        if (typeof document === 'undefined') return;
-        if (document.getElementById('offpeak-guard-style')) return;
-        const style = document.createElement('style');
-        style.id = 'offpeak-guard-style';
-        style.textContent = '@keyframes offpeak-spin{to{transform:rotate(360deg)}}';
-        document.head.appendChild(style);
-      } catch (error) { /* ignore */ }
+    let state = null;
+    let skew = 0;
+    let busy = false;
+    let button = null;
+
+    function fmt(ms) {
+      const total = Math.max(0, Math.round(ms / 1000));
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      const s = total % 60;
+      const pad = function (n) { return n < 10 ? '0' + n : String(n); };
+      if (h > 0) return h + 'h' + pad(m) + 'm';
+      if (m > 0) return m + 'm' + pad(s) + 's';
+      return s + 's';
     }
 
-    async function getState() {
-      const response = await fetch(API, { headers: { accept: 'application/json' } });
-      return response.json();
+    async function refresh() {
+      try {
+        const response = await fetch(API, { headers: { accept: 'application/json' } });
+        if (!response.ok) return;
+        const next = await response.json();
+        if (typeof next.now === 'number') skew = next.now - Date.now();
+        state = next;
+      } catch (error) { /* 网络抖一下就算了 */ }
     }
 
     async function act(action, body) {
@@ -29,142 +38,106 @@ window.__ModuleLoader__.load({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body || {}),
       });
-      const data = await response.json().catch(function () { return {}; });
-      if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
-      return data;
+      const data = await response.json().catch(function () { return null; });
+      if (!response.ok) throw new Error(data && data.error ? data.error : ('HTTP ' + response.status));
+      state = data;
+      if (typeof data.now === 'number') skew = data.now - Date.now();
     }
 
-    function clock(ms) {
-      const total = Math.max(0, Math.round(ms / 1000));
-      const h = Math.floor(total / 3600);
-      const m = Math.floor((total % 3600) / 60);
-      const s = total % 60;
-      const pad = function (n) { return n < 10 ? '0' + n : String(n); };
-      return h > 0 ? h + ' 小时 ' + pad(m) + ' 分' : pad(m) + ':' + pad(s);
+    function paint() {
+      if (!button) return;
+      const phase = state && state.phase === 'peak' ? 'peak' : 'valley';
+      const wait = !state || state.waitOffPeak !== false;
+      const remain = state && typeof state.nextChangeAt === 'number' ? state.nextChangeAt - (Date.now() + skew) : 0;
+      const paused = state && Array.isArray(state.paused) ? state.paused.length : 0;
+      let label = '🌙';
+      let title = '谷期 · 便宜时段';
+      if (phase === 'peak' && wait) {
+        label = '⏳ ' + fmt(remain);
+        title = '峰期 · 正在等待谷期，距谷期还有 ' + fmt(remain) + (paused > 0 ? '，已暂停 ' + paused + ' 个会话' : '') + '（点击立即继续）';
+      } else if (phase === 'peak') {
+        label = '⚡ ' + fmt(remain);
+        title = '峰期 · 未等待（按峰价计费），距谷期还有 ' + fmt(remain) + '（点击开启等待谷期）';
+      } else {
+        title = '谷期 · 便宜时段，距峰期还有 ' + fmt(remain) + (paused > 0 ? '，' + paused + ' 个会话等待续跑' : '') + '（点击切换等待谷期）';
+        const justResumed = state && state.lastResume && typeof state.lastResume.at === 'number' && Date.now() - state.lastResume.at < 120000;
+        if (justResumed) title = '已自动续跑 ' + state.lastResume.count + ' 个会话 · ' + title;
+      }
+      if (button.textContent !== label) button.textContent = label;
+      if (button.title !== title) button.title = title;
+      const color = phase === 'peak' && wait ? '#4a7dff' : phase === 'peak' ? 'var(--dsw-alias-label-tertiary, #888)' : '#2f9e5f';
+      if (button.style.color !== color) button.style.color = color;
+      const edge = phase === 'peak' && wait ? 'rgba(74,125,255,.55)' : 'var(--dsw-alias-border-secondary, rgba(127,127,127,.3))';
+      if (button.style.borderColor !== edge) button.style.borderColor = edge;
     }
 
-    const ui = {
-      bar: {
-        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-        fontSize: 12, padding: '6px 10px', borderRadius: 8, marginBottom: 6,
-        border: '1px solid var(--dsw-alias-border-secondary, rgba(127,127,127,.3))',
-        background: 'var(--dsw-alias-bg-secondary, rgba(127,127,127,.08))',
-        color: 'var(--dsw-alias-label-primary)',
-      },
-      spin: {
-        display: 'inline-block', width: 12, height: 12, borderRadius: '50%',
-        border: '2px solid rgba(127,127,127,.35)', borderTopColor: '#4a7dff',
-        animation: 'offpeak-spin 1s linear infinite',
-      },
-      button: {
-        fontSize: 12, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
-        border: '1px solid var(--dsw-alias-border-secondary, rgba(127,127,127,.35))',
-        background: 'transparent', color: 'inherit',
-      },
-      primary: {
-        fontSize: 12, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
-        border: '1px solid var(--dsw-alias-border-accent, #4a7dff)',
-        background: 'rgba(74,125,255,.14)', color: 'inherit',
-      },
-      muted: { color: 'var(--dsw-alias-label-tertiary)' },
-      on: { color: '#2f9e5f' },
-      off: { color: 'var(--dsw-alias-label-tertiary)' },
-    };
-
-    function Dock() {
-      const [state, setState] = useState(null);
-      const [now, setNow] = useState(Date.now());
-      const [busy, setBusy] = useState(false);
-      const [note, setNote] = useState('');
-      const skew = useRef(0);
-
-      useEffect(ensureStyle, []);
-
-      useEffect(function () {
-        let alive = true;
-        const load = async function () {
-          try {
-            const next = await getState();
-            if (!alive) return;
-            if (typeof next.now === 'number') skew.current = next.now - Date.now();
-            setState(next);
-          } catch (error) { /* 网络抖一下就算了 */ }
-        };
-        load();
-        const timer = setInterval(load, 3000);
-        const beat = setInterval(function () { setNow(Date.now()); }, 1000);
-        return function () { alive = false; clearInterval(timer); clearInterval(beat); };
-      }, []);
-
-      if (!state) return null;
-      const phase = state.phase === 'peak' ? 'peak' : 'valley';
-      const remain = typeof state.nextChangeAt === 'number' ? state.nextChangeAt - (now + skew.current) : 0;
-      const pausedCount = Array.isArray(state.paused) ? state.paused.length : 0;
-
-      const run = async function (action, body) {
-        setBusy(true);
-        try {
-          const next = await act(action, body);
-          if (typeof next.now === 'number') skew.current = next.now - Date.now();
-          setState(next);
-          setNote('');
-        } catch (error) {
-          setNote(String(error && error.message ? error.message : error));
-        } finally {
-          setBusy(false);
-        }
-      };
-
-      const toggle = function () { run('toggle', { waitOffPeak: !state.waitOffPeak }); };
-      const resumeNow = function () { run('resume-now', {}); };
-
-      const justResumed = state.lastResume && typeof state.lastResume.at === 'number' && Date.now() - state.lastResume.at < 180000;
-
-      if (phase === 'peak' && state.waitOffPeak) {
-        return React.createElement('div', { style: ui.bar },
-          React.createElement('span', { style: ui.spin }),
-          React.createElement('span', null, '峰期 · 正在等待谷期'),
-          React.createElement('span', { style: ui.muted }, '距谷期还有 ' + clock(remain)),
-          pausedCount > 0 ? React.createElement('span', { style: ui.muted }, '· 已暂停 ' + pausedCount + ' 个会话') : null,
-          React.createElement('span', { style: { flex: 1 } }),
-          React.createElement('button', { style: ui.primary, disabled: busy, onClick: resumeNow }, busy ? '处理中…' : '立即继续'),
-          React.createElement('button', { style: ui.button, disabled: busy, onClick: toggle }, '等待谷期：开'),
-          note ? React.createElement('span', { style: ui.muted }, note) : null
-        );
+    async function onClick(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (busy) return;
+      busy = true;
+      try {
+        const phase = state && state.phase === 'peak' ? 'peak' : 'valley';
+        const wait = !state || state.waitOffPeak !== false;
+        if (phase === 'peak' && wait) await act('resume-now', {});
+        else await act('toggle', { waitOffPeak: !wait });
+      } catch (error) {
+        /* 失败就保持原样，下次刷新再说 */
+      } finally {
+        busy = false;
+        paint();
       }
+    }
 
-      if (phase === 'peak') {
-        return React.createElement('div', { style: ui.bar },
-          React.createElement('span', null, '峰期 · 未等待（按峰价计费）'),
-          React.createElement('span', { style: ui.muted }, '距谷期还有 ' + clock(remain)),
-          React.createElement('span', { style: { flex: 1 } }),
-          React.createElement('button', { style: ui.button, disabled: busy, onClick: toggle }, '等待谷期：关'),
-          note ? React.createElement('span', { style: ui.muted }, note) : null
-        );
+    function createButton() {
+      const node = document.createElement('button');
+      node.type = 'button';
+      node.setAttribute(MARK, '1');
+      node.style.cssText = [
+        'display:inline-flex', 'align-items:center', 'justify-content:center',
+        'height:28px', 'min-width:34px', 'padding:0 8px', 'margin-right:6px',
+        'font-size:12px', 'line-height:1', 'font-variant-numeric:tabular-nums',
+        'border-radius:8px', 'border:1px solid rgba(127,127,127,.3)',
+        'background:transparent', 'cursor:pointer', 'user-select:none',
+        'white-space:nowrap', 'color:inherit',
+      ].join(';');
+      node.addEventListener('click', onClick);
+      return node;
+    }
+
+    function locateHost() {
+      const seat = document.querySelector('[data-composer-seat]');
+      if (!seat) return null;
+      const groups = seat.querySelectorAll('[class*="trailing"]');
+      if (groups.length > 0) return groups[groups.length - 1];
+      const buttons = seat.querySelectorAll('button');
+      if (buttons.length > 0) {
+        const last = buttons[buttons.length - 1];
+        if (last.parentElement) return last.parentElement;
       }
+      return null;
+    }
 
-      return React.createElement('div', { style: ui.bar },
-        React.createElement('span', { style: ui.on }, '谷期 · 便宜时段'),
-        React.createElement('span', { style: ui.muted }, '距峰期还有 ' + clock(remain)),
-        pausedCount > 0 ? React.createElement('span', { style: ui.muted }, '· ' + pausedCount + ' 个会话等待续跑') : null,
-        justResumed ? React.createElement('span', { style: ui.on }, '· 已自动续跑 ' + state.lastResume.count + ' 个会话') : null,
-        React.createElement('span', { style: { flex: 1 } }),
-        React.createElement('button', { style: ui.button, disabled: busy, onClick: toggle }, state.waitOffPeak ? '等待谷期：开' : '等待谷期：关'),
-        note ? React.createElement('span', { style: ui.muted }, note) : null
-      );
+    function ensure() {
+      try {
+        const host = locateHost();
+        if (!host) return;
+        if (host.querySelector('[' + MARK + ']')) { button = host.querySelector('[' + MARK + ']'); return; }
+        button = createButton();
+        host.insertBefore(button, host.firstChild);
+        paint();
+      } catch (error) { /* ignore */ }
     }
 
     function apply(ctx) {
-      ctx.slots.inject('conversation.composer.dock', function () {
-        return ctx.slots.register({
-          name: 'conversation.composer.dock',
-          id: 'dsh-offpeak-guard',
-          order: 40,
-        }, Dock);
-      });
+      const tick = function () { ensure(); paint(); };
+      tick();
+      setInterval(tick, 500);
+      setInterval(refresh, 3000);
+      refresh();
     }
 
-    module.exports = { apply: apply, inject: ['slots'] };
+    module.exports = { apply: apply, inject: [] };
     return module.exports;
   },
 });
