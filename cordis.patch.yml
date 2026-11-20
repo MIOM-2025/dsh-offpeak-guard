@@ -1,0 +1,16 @@
+# ============================================================================
+# dsh-offpeak-guard —— bundle patch
+# ============================================================================
+# 峰期自动停机、谷期自动续跑，省一半钱。
+# 装：dsh plugin --profile web add link:/data/data/com.termux/files/home/dsh-offpeak-guard
+# ============================================================================
+- insert:
+    - id: offpeak-guard
+      name: dsh-offpeak-guard
+      config:
+        enabled: true
+        # 默认开启「等待谷期」；前端开关改的是持久化状态，会覆盖这里的初值
+        waitOffPeak: true
+        # 多久检查一次峰谷（毫秒）
+        intervalMs: 20000
+

@@ -1,0 +1,45 @@
+{
+  "name": "dsh-offpeak-guard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 峰谷闸门：峰期自动停掉所有会话，谷期自动续跑，并在输入框上方给出倒计时和开关。",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "off-peak",
+    "cost-saving"
+  ],
+  "license": "MIT",
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MIOM-2025/dsh-offpeak-guard.git"
+  },
+  "homepage": "https://github.com/MIOM-2025/dsh-offpeak-guard",
+  "bugs": {
+    "url": "https://github.com/MIOM-2025/dsh-offpeak-guard/issues"
+  }
+}
