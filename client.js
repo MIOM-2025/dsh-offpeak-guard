@@ -5,6 +5,7 @@ window.__ModuleLoader__.load({
     var exports = module.exports;
     const API = '/offpeak-guard/api';
     const MARK = 'data-offpeak-btn';
+    const FADE = 170;
 
     let state = null;
     let skew = 0;
@@ -13,10 +14,11 @@ window.__ModuleLoader__.load({
     let line1 = null;
     let line2 = null;
     let lastTitle = '';
-    let flash = null;
     let started = false;
-    let observer = null;
+    let animating = false;
     let lastFix = 0;
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     function fmt(ms) {
       const total = Math.max(0, Math.round(ms / 1000));
@@ -53,33 +55,19 @@ window.__ModuleLoader__.load({
       if (data && (data.phase === 'peak' || data.phase === 'valley')) state = data;
     }
 
-    function setFlash(text, good) {
-      flash = { text: text, until: Date.now() + 1800, good: good === true };
-    }
-
-    // 第一行永远说清「这是什么开关 + 现在开还是关」，第二行是倒计时。
     function view() {
       const phase = state && state.phase === 'peak' ? 'peak' : 'valley';
       const wait = !state || state.waitOffPeak !== false;
       const remain = state && typeof state.nextChangeAt === 'number' ? state.nextChangeAt - (Date.now() + skew) : 0;
       const paused = state && Array.isArray(state.paused) ? state.paused.length : 0;
       const clock = fmt(remain);
-      if (flash && Date.now() < flash.until) {
-        return {
-          top: flash.text,
-          bottom: phase === 'peak' ? '峰期 ' + clock : '谷期 ' + clock,
-          color: '#ffffff',
-          background: flash.good ? '#2f9e5f' : '#c0392b',
-          title: '等待谷期【' + (wait ? '开' : '关') + '】',
-        };
-      }
       if (phase === 'peak' && wait) {
         return {
           top: '等待谷期 开',
           bottom: '峰期 ' + clock,
           color: '#ffffff',
           background: '#4a7dff',
-          title: '等待谷期【开】\n峰期：正在等待，已暂停 ' + paused + ' 个会话\n距谷期还有 ' + clock + '\n点击：关掉等待，并立即续跑已暂停的会话',
+          title: '等待谷期【开】\n峰期：正在等待，已暂停 ' + paused + ' 个会话\n距谷期还有 ' + clock + '\n点击：关闭等待，并立即续跑已暂停的会话',
         };
       }
       if (phase === 'peak') {
@@ -102,7 +90,8 @@ window.__ModuleLoader__.load({
       };
     }
 
-    function paint() {
+    // 只写字，不碰颜色/透明度（动画由 sequence 控制）
+    function paintText() {
       if (!button) return;
       const next = view();
       if (line1 && line1.textContent !== next.top) line1.textContent = next.top;
@@ -112,32 +101,59 @@ window.__ModuleLoader__.load({
       if (button.style.background !== next.background) button.style.background = next.background;
     }
 
+    function fadeTo(value) {
+      if (!button) return sleep(FADE);
+      button.style.opacity = String(value);
+      return sleep(FADE);
+    }
+
+    // 点一下的过渡：先淡出旧文字 → 显示结果 → 停一会 → 淡出 → 显示新状态 → 淡入
+    async function sequence(resultText) {
+      animating = true;
+      try {
+        await fadeTo(0);
+        if (line1) line1.textContent = resultText;
+        if (line2) line2.textContent = '';
+        await fadeTo(1);
+        await sleep(900);
+        await fadeTo(0);
+        paintText();
+        await fadeTo(1);
+      } finally {
+        animating = false;
+        if (button) button.style.opacity = '1';
+      }
+    }
+
     async function onClick(event) {
       event.preventDefault();
       event.stopPropagation();
       if (busy) return;
       busy = true;
-      const wait = !state || state.waitOffPeak !== false;
-      const phase = state && state.phase === 'peak' ? 'peak' : 'valley';
+      let resultText = '失败';
       try {
+        const wait = !state || state.waitOffPeak !== false;
+        const phase = state && state.phase === 'peak' ? 'peak' : 'valley';
         if (wait) {
           setState(await act('toggle', { waitOffPeak: false }));
           if (phase === 'peak') {
             const result = await act('resume-now', {});
             setState(result);
-            setFlash('已继续 ' + (result && result.resumed ? result.resumed : 0), true);
+            resultText = '已继续 ' + (result && result.resumed ? result.resumed : 0);
           } else {
-            setFlash('已关闭', false);
+            resultText = '已关闭';
           }
         } else {
           setState(await act('toggle', { waitOffPeak: true }));
-          setFlash('已开启', true);
+          resultText = '已开启';
         }
       } catch (error) {
-        setFlash('失败', false);
+        resultText = '失败';
+      }
+      try {
+        await sequence(resultText);
       } finally {
         busy = false;
-        paint();
       }
     }
 
@@ -146,12 +162,10 @@ window.__ModuleLoader__.load({
       node.type = 'button';
       node.setAttribute(MARK, '1');
       const s = node.style;
-      s.cssText = '';
       s.display = 'inline-flex';
       s.flexDirection = 'column';
       s.alignItems = 'center';
       s.justifyContent = 'center';
-      s.gap = '0px';
       s.height = '30px';
       s.minWidth = '86px';
       s.padding = '0 8px';
@@ -165,7 +179,8 @@ window.__ModuleLoader__.load({
       s.userSelect = 'none';
       s.whiteSpace = 'nowrap';
       s.fontVariantNumeric = 'tabular-nums';
-      s.transition = 'background .15s,color .15s';
+      s.opacity = '1';
+      s.transition = 'opacity .17s ease, background .15s ease, color .15s ease';
 
       const a = document.createElement('span');
       a.style.fontSize = '11px';
@@ -208,18 +223,18 @@ window.__ModuleLoader__.load({
         if (!host) return;
         if (contains(host)) return;
         const now = Date.now();
-        if (force !== true && now - lastFix < 120) return; // 被 React 反复删时也别太频繁
+        if (force !== true && now - lastFix < 120) return;
         lastFix = now;
         if (!button) button = createButton();
         host.insertBefore(button, host.firstChild);
-        paint();
+        paintText();
       } catch (error) { /* ignore */ }
     }
 
     function watch() {
       if (typeof MutationObserver === 'undefined') return;
       try {
-        observer = new MutationObserver(function () { ensure(false); });
+        const observer = new MutationObserver(function () { ensure(false); });
         observer.observe(document.body, { childList: true, subtree: true });
       } catch (error) { /* ignore */ }
     }
@@ -230,7 +245,10 @@ window.__ModuleLoader__.load({
       button = createButton();
       ensure(true);
       watch();
-      setInterval(function () { ensure(false); paint(); }, 400);
+      setInterval(function () {
+        ensure(false);
+        if (!animating) paintText();
+      }, 400);
       setInterval(refresh, 3000);
       refresh();
     }
