@@ -70,8 +70,8 @@ await sleep(500);
 
 const button = group.children.find((c) => c.attrs['data-offpeak-btn'] === '1');
 assert.ok(button, '按钮要挂上');
-assert.equal(button.children[0].textContent, '等待谷期 开', '初始第一行: ' + button.children[0].textContent);
-assert.ok(button.children[1].textContent.startsWith('峰期'), '第二行是阶段+倒计时: ' + button.children[1].textContent);
+assert.equal(button.children[0].textContent, '等待谷期', '初始第一行: ' + button.children[0].textContent);
+assert.ok(button.children[1].textContent.startsWith('开 '), '第二行是开关+倒计时: ' + button.children[1].textContent);
 assert.equal(button.style.opacity, '1');
 
 // 第一次点击：淡出 -> 已继续 2 -> 淡出 -> 等待谷期 关
@@ -81,7 +81,7 @@ assert.equal(button.style.opacity, '0', '点击后先淡出（隐藏过渡）');
 await sleep(320);
 assert.ok(button.children[0].textContent.includes('已继续'), '淡出后显示结果: ' + button.children[0].textContent);
 await sleep(1300);
-assert.equal(button.children[0].textContent, '等待谷期 关', '结果淡出后显示新状态: ' + button.children[0].textContent);
+assert.ok(button.children[1].textContent.startsWith('关 '), '结果淡出后显示新状态: ' + button.children[1].textContent);
 assert.equal(button.style.opacity, '1', '最后淡回可见');
 
 const posts = calls.filter((c) => c.startsWith('POST')).map((c) => c.split('/').pop());
@@ -96,7 +96,7 @@ assert.equal(button.style.opacity, '0', '第二次点击同样先淡出');
 await sleep(320);
 assert.ok(button.children[0].textContent.includes('已开启'), '显示已开启: ' + button.children[0].textContent);
 await sleep(1300);
-assert.equal(button.children[0].textContent, '等待谷期 开', '最后回到等待谷期 开');
+assert.ok(button.children[1].textContent.startsWith('开 '), '最后回到开: ' + button.children[1].textContent);
 const posts2 = calls.filter((c) => c.startsWith('POST')).map((c) => c.split('/').pop());
 assert.deepEqual(posts2, ['toggle'], '只切开关: ' + posts2.join(','));
 assert.equal(toggleValue, true);

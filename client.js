@@ -61,10 +61,11 @@ window.__ModuleLoader__.load({
       const remain = state && typeof state.nextChangeAt === 'number' ? state.nextChangeAt - (Date.now() + skew) : 0;
       const paused = state && Array.isArray(state.paused) ? state.paused.length : 0;
       const clock = fmt(remain);
+      const flag = (wait ? '开 ' : '关 ') + clock;
       if (phase === 'peak' && wait) {
         return {
-          top: '等待谷期 开',
-          bottom: '峰期 ' + clock,
+          top: '等待谷期',
+          bottom: flag,
           color: '#ffffff',
           background: '#4a7dff',
           title: '等待谷期【开】\n峰期：正在等待，已暂停 ' + paused + ' 个会话\n距谷期还有 ' + clock + '\n点击：关闭等待，并立即续跑已暂停的会话',
@@ -72,16 +73,16 @@ window.__ModuleLoader__.load({
       }
       if (phase === 'peak') {
         return {
-          top: '等待谷期 关',
-          bottom: '峰期 ' + clock,
+          top: '等待谷期',
+          bottom: flag,
           color: 'var(--dsw-alias-label-secondary, #999)',
           background: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))',
           title: '等待谷期【关】\n峰期：照常跑，按峰价计费\n距谷期还有 ' + clock + '\n点击：开启等待（峰期会立刻停掉正在跑的会话）',
         };
       }
       return {
-        top: '等待谷期 ' + (wait ? '开' : '关'),
-        bottom: '谷期 ' + clock,
+        top: '等待谷期',
+        bottom: flag,
         color: wait ? '#ffffff' : 'var(--dsw-alias-label-secondary, #999)',
         background: wait ? '#2f9e5f' : 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))',
         title: '等待谷期【' + (wait ? '开' : '关') + '】\n谷期：便宜时段，距峰期 ' + clock
@@ -89,7 +90,6 @@ window.__ModuleLoader__.load({
           + '\n点击：' + (wait ? '关闭等待（峰期谷期都照常跑）' : '开启等待（峰期自动停）'),
       };
     }
-
     // 只写字，不碰颜色/透明度（动画由 sequence 控制）
     function paintText() {
       if (!button) return;
@@ -166,8 +166,8 @@ window.__ModuleLoader__.load({
       s.flexDirection = 'column';
       s.alignItems = 'center';
       s.justifyContent = 'center';
-      s.height = '30px';
-      s.minWidth = '86px';
+      s.height = '28px';
+      s.minWidth = '60px';
       s.padding = '0 8px';
       s.marginRight = '6px';
       s.boxSizing = 'border-box';
@@ -183,12 +183,12 @@ window.__ModuleLoader__.load({
       s.transition = 'opacity .17s ease, background .15s ease, color .15s ease';
 
       const a = document.createElement('span');
-      a.style.fontSize = '11px';
-      a.style.lineHeight = '13px';
+      a.style.fontSize = '10px';
+      a.style.lineHeight = '12px';
       a.style.fontWeight = '600';
       const b = document.createElement('span');
-      b.style.fontSize = '10px';
-      b.style.lineHeight = '12px';
+      b.style.fontSize = '9px';
+      b.style.lineHeight = '11px';
       b.style.opacity = '0.85';
       node.appendChild(a);
       node.appendChild(b);
