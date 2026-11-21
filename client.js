@@ -1,16 +1,24 @@
 window.__ModuleLoader__.load({
   id: 'dsh-offpeak-guard',
   factory: (require) => {
+    // 桌面端/多页面可能重复加载同一个 client 插件，这里只认第一份，避免两个浮层互相打架
+    if (window.__dshOffpeakGuardLoaded) return { apply: function () {}, inject: [] };
+    window.__dshOffpeakGuardLoaded = true;
     var module = { exports: {} };
     var exports = module.exports;
     const API = '/offpeak-guard/api';
     const MARK = 'data-offpeak-btn';
+    const W = 92;
+    const H = 28;
 
     let state = null;
     let skew = 0;
     let busy = false;
+    let layer = null;
     let button = null;
-    let flash = null; // { text, until, good }
+    let flash = null;
+    let lastTitle = '';
+    let started = false;
 
     function fmt(ms) {
       const total = Math.max(0, Math.round(ms / 1000));
@@ -53,7 +61,6 @@ window.__ModuleLoader__.load({
       flash = { text: text, until: Date.now() + 1800, good: good === true };
     }
 
-    // 一切显示都从这三个值推出来：谷/峰、等待开关、剩余时间。
     function view() {
       const phase = state && state.phase === 'peak' ? 'peak' : 'valley';
       const wait = !state || state.waitOffPeak !== false;
@@ -62,45 +69,37 @@ window.__ModuleLoader__.load({
       const left = fmt(remain);
       if (flash && Date.now() < flash.until) {
         return {
-          phase: phase, wait: wait, remain: remain, paused: paused,
           label: flash.text,
-          color: flash.good ? '#2f9e5f' : '#c0392b',
-          edge: flash.good ? 'rgba(47,158,95,.55)' : 'rgba(192,57,43,.55)',
-          background: 'transparent',
+          color: flash.good ? 'var(--dsw-alias-label-inverse, #fff)' : 'var(--dsw-alias-label-inverse, #fff)',
+          background: flash.good ? '#2f9e5f' : '#c0392b',
+          edge: 'transparent',
           title: '等待谷期【' + (wait ? '开' : '关') + '】' + (phase === 'peak' ? ' · 峰期' : ' · 谷期'),
         };
       }
       if (phase === 'peak' && wait) {
         return {
-          phase: phase, wait: wait, remain: remain, paused: paused,
-          label: '⏳ 等待中 ' + left,
+          label: '⏳ 等待 ' + left,
           color: '#ffffff',
-          edge: 'rgba(74,125,255,.9)',
           background: '#4a7dff',
-          title: '等待谷期【开】· 峰期\n正在等待谷期，距谷期还有 ' + left + (paused > 0 ? '，已暂停 ' + paused + ' 个会话' : '')
-            + '\n点击：关掉等待，并立即续跑已暂停的会话',
+          edge: 'transparent',
+          title: '等待谷期【开】· 峰期：正在等待谷期，已暂停 ' + paused + ' 个会话。点击＝关掉等待并立即续跑',
         };
       }
       if (phase === 'peak') {
         return {
-          phase: phase, wait: wait, remain: remain, paused: paused,
-          label: '⚡ 不等待 ' + left,
+          label: '⚡ 不等 ' + left,
           color: 'var(--dsw-alias-label-tertiary, #888)',
-          edge: 'rgba(127,127,127,.35)',
-          background: 'transparent',
-          title: '等待谷期【关】· 峰期\n峰期照常跑，按峰价计费，距谷期还有 ' + left
-            + '\n点击：开启等待（峰期会立刻停掉正在跑的会话，谷期再自动续跑）',
+          background: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))',
+          edge: 'rgba(127,127,127,.3)',
+          title: '等待谷期【关】· 峰期：照常跑、按峰价计费。点击＝开启等待（峰期会立刻停）',
         };
       }
       return {
-        phase: phase, wait: wait, remain: remain, paused: paused,
-        label: wait ? '🌙 等待·开' : '🌙 等待·关',
-        color: wait ? '#2f9e5f' : 'var(--dsw-alias-label-tertiary, #888)',
-        edge: wait ? 'rgba(47,158,95,.55)' : 'rgba(127,127,127,.35)',
-        background: 'transparent',
-        title: '等待谷期【' + (wait ? '开' : '关') + '】· 谷期\n距峰期还有 ' + left
-          + (paused > 0 ? '，' + paused + ' 个会话等待续跑' : '')
-          + '\n点击：' + (wait ? '关闭等待（谷期、峰期都照常跑）' : '开启等待（峰期会自动停）'),
+        label: wait ? '🌙 开 ' + left : '🌙 关 ' + left,
+        color: wait ? 'var(--dsw-alias-label-inverse, #fff)' : 'var(--dsw-alias-label-tertiary, #888)',
+        background: wait ? '#2f9e5f' : 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))',
+        edge: wait ? 'transparent' : 'rgba(127,127,127,.3)',
+        title: '等待谷期【' + (wait ? '开' : '关') + '】· 谷期：距峰期 ' + left + '。点击＝' + (wait ? '关闭等待' : '开启等待'),
       };
     }
 
@@ -108,11 +107,10 @@ window.__ModuleLoader__.load({
       if (!button) return;
       const next = view();
       if (button.textContent !== next.label) button.textContent = next.label;
-      if (button.title !== next.title) button.title = next.title;
+      if (lastTitle !== next.title) { button.title = next.title; lastTitle = next.title; }
       if (button.style.color !== next.color) button.style.color = next.color;
+      if (button.style.background !== next.background) button.style.background = next.background;
       if (button.style.borderColor !== next.edge) button.style.borderColor = next.edge;
-      const background = next.background;
-      if (button.style.background !== background) button.style.background = background;
     }
 
     async function onClick(event) {
@@ -122,11 +120,9 @@ window.__ModuleLoader__.load({
       busy = true;
       const wait = !state || state.waitOffPeak !== false;
       const phase = state && state.phase === 'peak' ? 'peak' : 'valley';
-      paint();
       try {
         if (wait) {
-          const after = await act('toggle', { waitOffPeak: false });
-          setState(after);
+          setState(await act('toggle', { waitOffPeak: false }));
           if (phase === 'peak') {
             const result = await act('resume-now', {});
             setState(result);
@@ -135,8 +131,7 @@ window.__ModuleLoader__.load({
             setFlash('已关闭等待', false);
           }
         } else {
-          const after = await act('toggle', { waitOffPeak: true });
-          setState(after);
+          setState(await act('toggle', { waitOffPeak: true }));
           setFlash('已开启等待', true);
         }
       } catch (error) {
@@ -147,51 +142,69 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function createButton() {
-      const node = document.createElement('button');
-      node.type = 'button';
-      node.setAttribute(MARK, '1');
-      node.style.cssText = [
-        'display:inline-flex', 'align-items:center', 'justify-content:center',
-        'height:28px', 'min-width:36px', 'padding:0 8px', 'margin-right:6px',
-        'font-size:12px', 'line-height:1', 'font-variant-numeric:tabular-nums',
-        'border-radius:8px', 'border:1px solid rgba(127,127,127,.3)',
-        'background:transparent', 'cursor:pointer', 'user-select:none',
-        'white-space:nowrap', 'color:inherit', 'transition:background .15s, color .15s, border-color .15s',
-      ].join(';');
-      node.addEventListener('click', onClick);
-      return node;
+    // 独立浮层：挂在 body 上、fixed 定位，React 重渲染碰不到它，所以不会闪。
+    function ensureLayer() {
+      if (layer) return layer;
+      layer = document.createElement('div');
+      layer.setAttribute(MARK, '1');
+      layer.style.position = 'fixed';
+      layer.style.zIndex = '60';
+      layer.style.display = 'none';
+      layer.style.pointerEvents = 'auto';
+      button = document.createElement('button');
+      button.type = 'button';
+      const s = button.style;
+      s.display = 'block';
+      s.width = W + 'px';
+      s.height = H + 'px';
+      s.padding = '0';
+      s.boxSizing = 'border-box';
+      s.overflow = 'hidden';
+      s.textOverflow = 'ellipsis';
+      s.whiteSpace = 'nowrap';
+      s.fontSize = '12px';
+      s.lineHeight = H + 'px';
+      s.textAlign = 'center';
+      s.fontVariantNumeric = 'tabular-nums';
+      s.borderRadius = '8px';
+      s.border = '1px solid rgba(127,127,127,.3)';
+      s.background = 'transparent';
+      s.color = 'inherit';
+      s.cursor = 'pointer';
+      s.userSelect = 'none';
+      s.transition = 'background .15s,color .15s';
+      button.addEventListener('click', onClick);
+      layer.appendChild(button);
+      document.body.appendChild(layer);
+      return layer;
     }
-
-    function locateHost() {
+    function place() {
       const seat = document.querySelector('[data-composer-seat]');
-      if (!seat) return null;
-      const groups = seat.querySelectorAll('[class*="trailing"]');
-      if (groups.length > 0) return groups[groups.length - 1];
-      const buttons = seat.querySelectorAll('button');
-      if (buttons.length > 0) {
-        const last = buttons[buttons.length - 1];
-        if (last.parentElement) return last.parentElement;
+      if (!seat) { if (layer) layer.style.display = 'none'; return; }
+      const all = Array.prototype.slice.call(seat.querySelectorAll('button'));
+      if (all.length === 0) { if (layer) layer.style.display = 'none'; return; }
+      const anchor = all[all.length - 1];
+      const rect = anchor.getBoundingClientRect();
+      const lefts = all.map(function (node) { return node.getBoundingClientRect().left; });
+      const minLeft = Math.min.apply(null, lefts);
+      let left = minLeft - W - 6;
+      let top = rect.top + (rect.height - H) / 2;
+      if (left < 4) {
+        left = Math.max(4, rect.right - W);
+        top = rect.top - H - 6;
       }
-      return null;
-    }
-
-    function ensure() {
-      try {
-        const host = locateHost();
-        if (!host) return;
-        const existing = host.querySelector('[' + MARK + ']');
-        if (existing) { button = existing; return; }
-        button = createButton();
-        host.insertBefore(button, host.firstChild);
-        paint();
-      } catch (error) { /* ignore */ }
+      layer.style.left = Math.round(left) + 'px';
+      layer.style.top = Math.round(top) + 'px';
+      layer.style.display = 'block';
     }
 
     function apply(ctx) {
-      const tick = function () { ensure(); paint(); };
+      if (started) return;
+      started = true;
+      try { ensureLayer(); } catch (error) { return; }
+      const tick = function () { place(); paint(); };
       tick();
-      setInterval(tick, 500);
+      setInterval(tick, 300);
       setInterval(refresh, 3000);
       refresh();
     }

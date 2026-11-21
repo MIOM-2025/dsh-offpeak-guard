@@ -5,89 +5,71 @@ global.window = { __ModuleLoader__: { load(spec) { captured = spec; } } };
 
 class El {
   constructor(tag) {
-    this.tagName = tag;
-    this.children = [];
-    this.attrs = {};
-    this.style = {};
-    this.listeners = {};
-    this.textContent = '';
-    this.title = '';
+    this.tagName = tag; this.children = []; this.attrs = {}; this.style = {};
+    this.listeners = {}; this.textContent = ''; this.title = '';
+    this.rect = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
   }
-  setAttribute(key, value) { this.attrs[key] = value; }
-  getAttribute(key) { return this.attrs[key]; }
-  addEventListener(type, fn) { this.listeners[type] = fn; }
-  appendChild(child) { this.children.push(child); return child; }
-  insertBefore(child, ref) {
-    const index = ref === undefined || ref === null ? -1 : this.children.indexOf(ref);
-    if (index < 0) this.children.push(child); else this.children.splice(index, 0, child);
-    return child;
-  }
-  get firstChild() { return this.children[0] ?? null; }
-  querySelector(selector) {
-    if (selector === '[data-offpeak-btn]') return this.children.find((c) => c.attrs['data-offpeak-btn'] === '1') ?? null;
+  setAttribute(k, v) { this.attrs[k] = v; }
+  getAttribute(k) { return this.attrs[k]; }
+  addEventListener(t, f) { this.listeners[t] = f; }
+  appendChild(c) { this.children.push(c); return c; }
+  getBoundingClientRect() { return this.rect; }
+  querySelector(sel) {
+    if (sel === '[' + 'data-offpeak-btn' + ']') return this.children.find((c) => c.attrs['data-offpeak-btn'] === '1') ?? null;
+    if (sel === 'button') return this.children.find((c) => c.tagName === 'button') ?? null;
     return null;
   }
-  querySelectorAll(selector) {
-    if (selector === '[class*="trailing"]') return this.classes.includes('_trailing') ? [this] : [];
-    if (selector === 'button') return this.children.filter((c) => c.tagName === 'button');
+  querySelectorAll(sel) {
+    if (sel === 'button') return this.children.filter((c) => c.tagName === 'button');
     return [];
   }
 }
 
-class Seat extends El {
-  constructor(group, sendButton) {
-    super('div');
-    this.group = group;
-    this.sendButton = sendButton;
-  }
-  querySelectorAll(selector) {
-    if (selector === '[class*="trailing"]') return [this.group];
-    return super.querySelectorAll(selector);
-  }
-}
-
-// —— 造一版和真实结构一致的 DOM：seat > card > controls > trailing[ 发送按钮 ] ——
 const send = new El('button');
 send.textContent = '发送';
-const sibling = new El('button');           // 另一个已有按钮，验证不会被打乱
-sibling.textContent = '附件';
-const group = new El('div');
-group.classes = ['uV2eYG_trailing'];
-group.appendChild(sibling);
-group.appendChild(send);
-const seat = new Seat(group, send);
+send.rect = { left: 900, top: 600, right: 960, bottom: 628, width: 60, height: 28 };
+const seat = new El('div');
+seat.appendChild(send);
+const body = new El('body');
 global.document = {
-  createElement(tag) { return new El(tag); },
-  querySelector(selector) { return selector === '[data-composer-seat]' ? seat : null; },
-  head: new El('head'),
-  getElementById() { return null; },
+  createElement: (tag) => new El(tag),
+  body: body,
+  querySelector: (sel) => (sel === '[data-composer-seat]' ? seat : null),
 };
 
 await import('../client.js');
-assert.ok(captured, 'client 应该注册到 __ModuleLoader__');
 const plugin = captured.factory(function () { return {}; });
 assert.equal(typeof plugin.apply, 'function');
-assert.ok(Array.isArray(plugin.inject) && plugin.inject.length === 0, '不再依赖 slots 服务');
 
 plugin.apply({});
-await new Promise((resolve) => setTimeout(resolve, 60));
+plugin.apply({}); // 第二次必须幂等
 
-const mine = group.children.filter((c) => c.attrs['data-offpeak-btn'] === '1');
-assert.equal(mine.length, 1, '应该在 trailing 组里插入恰好一个按钮');
-assert.equal(group.children[0], mine[0], '按钮要排在最前面（发送按钮左侧）');
-assert.equal(group.children.length, 3, '原有按钮不能被移除');
-assert.equal(group.children[1], sibling);
-assert.equal(group.children[2], send);
-assert.ok(mine[0].style.cssText.includes('inline-flex'), '按钮走行内 flex，不靠绝对定位，因此不会重合');
-assert.equal(mine[0].getAttribute('data-offpeak-btn'), '1');
-assert.equal(mine[0].title.includes('谷期') || mine[0].title.includes('峰期'), true, '按钮应带状态提示');
-assert.ok(mine[0].listeners.click, '按钮要有点击处理');
+const layers = body.children.filter((c) => c.attrs['data-offpeak-btn'] === '1');
+assert.equal(layers.length, 1, '只能有一个浮层');
+const layer = layers[0];
+assert.equal(layer.style.position, 'fixed', '必须是脱离 React 的 fixed 浮层');
+assert.equal(layer.style.display, 'block');
+assert.equal(layer.children.length, 1, '浮层里只有一个按钮');
+const button = layer.children[0];
+assert.equal(button.style.width, '92px', '宽度固定，倒计时变长也不会抖');
+assert.ok(button.listeners.click, '按钮要可点');
+assert.ok(button.textContent.length > 0, '按钮要有文字');
 
-// 再跑一次 ensure 不能重复插入
-plugin.apply({});
-await new Promise((resolve) => setTimeout(resolve, 60));
-assert.equal(group.children.filter((c) => c.attrs['data-offpeak-btn'] === '1').length, 1, '重复调用不能插第二个');
+const left = parseInt(layer.style.left, 10);
+const top = parseInt(layer.style.top, 10);
+assert.equal(left, 900 - 92 - 6, '应贴在发送按钮左边');
+assert.equal(top, 600, '与发送按钮垂直居中对齐');
+assert.ok(left + 92 + 6 <= 900, '不能和发送按钮重叠');
 
-console.log('ALL PASS dom mount');
+// 窄屏：左边放不下就挪到发送按钮上方
+send.rect = { left: 40, top: 600, right: 100, bottom: 628, width: 60, height: 28 };
+const plugin2 = captured.factory(function () { return {}; });
+plugin2.apply({});
+await new Promise((r) => setTimeout(r, 350));
+const layer2 = body.children.filter((c) => c.attrs['data-offpeak-btn'] === '1')[0];
+assert.equal(parseInt(layer2.style.top, 10), 600 - 28 - 6, '挤不下时改放上方');
+assert.equal(parseInt(layer2.style.left, 10), 100 - 92, '上方版本右对齐发送按钮');
+
+console.log('ALL PASS dom overlay');
 process.exit(0);
 
