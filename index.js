@@ -302,6 +302,8 @@ export function apply(ctx, config = {}) {
         const action = body.action ?? String(req.url ?? '').split('/').pop();
         if (action === 'toggle') {
           guard.setWait(body.waitOffPeak === true);
+          // 立刻跑一次判定：刚打开等待且正处峰期时，正在跑的会话马上就停
+          kick().catch(() => {});
           return send(200, guard.snapshot());
         }
         if (action === 'resume-now') {
