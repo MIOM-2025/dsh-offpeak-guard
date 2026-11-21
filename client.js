@@ -10,6 +10,7 @@ window.__ModuleLoader__.load({
     let skew = 0;
     let busy = false;
     let button = null;
+    let flash = null; // { text, until, good }
 
     function fmt(ms) {
       const total = Math.max(0, Math.round(ms / 1000));
@@ -40,35 +41,78 @@ window.__ModuleLoader__.load({
       });
       const data = await response.json().catch(function () { return null; });
       if (!response.ok) throw new Error(data && data.error ? data.error : ('HTTP ' + response.status));
-      state = data;
-      if (typeof data.now === 'number') skew = data.now - Date.now();
+      if (data && typeof data.now === 'number') skew = data.now - Date.now();
+      return data;
     }
 
-    function paint() {
-      if (!button) return;
+    function setState(data) {
+      if (data && (data.phase === 'peak' || data.phase === 'valley')) state = data;
+    }
+
+    function setFlash(text, good) {
+      flash = { text: text, until: Date.now() + 1800, good: good === true };
+    }
+
+    // 一切显示都从这三个值推出来：谷/峰、等待开关、剩余时间。
+    function view() {
       const phase = state && state.phase === 'peak' ? 'peak' : 'valley';
       const wait = !state || state.waitOffPeak !== false;
       const remain = state && typeof state.nextChangeAt === 'number' ? state.nextChangeAt - (Date.now() + skew) : 0;
       const paused = state && Array.isArray(state.paused) ? state.paused.length : 0;
-      let label = '🌙';
-      let title = '谷期 · 便宜时段';
-      if (phase === 'peak' && wait) {
-        label = '⏳ ' + fmt(remain);
-        title = '峰期 · 正在等待谷期，距谷期还有 ' + fmt(remain) + (paused > 0 ? '，已暂停 ' + paused + ' 个会话' : '') + '（点击立即继续）';
-      } else if (phase === 'peak') {
-        label = '⚡ ' + fmt(remain);
-        title = '峰期 · 未等待（按峰价计费），距谷期还有 ' + fmt(remain) + '（点击开启等待谷期）';
-      } else {
-        title = '谷期 · 便宜时段，距峰期还有 ' + fmt(remain) + (paused > 0 ? '，' + paused + ' 个会话等待续跑' : '') + '（点击切换等待谷期）';
-        const justResumed = state && state.lastResume && typeof state.lastResume.at === 'number' && Date.now() - state.lastResume.at < 120000;
-        if (justResumed) title = '已自动续跑 ' + state.lastResume.count + ' 个会话 · ' + title;
+      const left = fmt(remain);
+      if (flash && Date.now() < flash.until) {
+        return {
+          phase: phase, wait: wait, remain: remain, paused: paused,
+          label: flash.text,
+          color: flash.good ? '#2f9e5f' : '#c0392b',
+          edge: flash.good ? 'rgba(47,158,95,.55)' : 'rgba(192,57,43,.55)',
+          background: 'transparent',
+          title: '等待谷期【' + (wait ? '开' : '关') + '】' + (phase === 'peak' ? ' · 峰期' : ' · 谷期'),
+        };
       }
-      if (button.textContent !== label) button.textContent = label;
-      if (button.title !== title) button.title = title;
-      const color = phase === 'peak' && wait ? '#4a7dff' : phase === 'peak' ? 'var(--dsw-alias-label-tertiary, #888)' : '#2f9e5f';
-      if (button.style.color !== color) button.style.color = color;
-      const edge = phase === 'peak' && wait ? 'rgba(74,125,255,.55)' : 'var(--dsw-alias-border-secondary, rgba(127,127,127,.3))';
-      if (button.style.borderColor !== edge) button.style.borderColor = edge;
+      if (phase === 'peak' && wait) {
+        return {
+          phase: phase, wait: wait, remain: remain, paused: paused,
+          label: '⏳ 等待中 ' + left,
+          color: '#ffffff',
+          edge: 'rgba(74,125,255,.9)',
+          background: '#4a7dff',
+          title: '等待谷期【开】· 峰期\n正在等待谷期，距谷期还有 ' + left + (paused > 0 ? '，已暂停 ' + paused + ' 个会话' : '')
+            + '\n点击：关掉等待，并立即续跑已暂停的会话',
+        };
+      }
+      if (phase === 'peak') {
+        return {
+          phase: phase, wait: wait, remain: remain, paused: paused,
+          label: '⚡ 不等待 ' + left,
+          color: 'var(--dsw-alias-label-tertiary, #888)',
+          edge: 'rgba(127,127,127,.35)',
+          background: 'transparent',
+          title: '等待谷期【关】· 峰期\n峰期照常跑，按峰价计费，距谷期还有 ' + left
+            + '\n点击：开启等待（峰期会立刻停掉正在跑的会话，谷期再自动续跑）',
+        };
+      }
+      return {
+        phase: phase, wait: wait, remain: remain, paused: paused,
+        label: wait ? '🌙 等待·开' : '🌙 等待·关',
+        color: wait ? '#2f9e5f' : 'var(--dsw-alias-label-tertiary, #888)',
+        edge: wait ? 'rgba(47,158,95,.55)' : 'rgba(127,127,127,.35)',
+        background: 'transparent',
+        title: '等待谷期【' + (wait ? '开' : '关') + '】· 谷期\n距峰期还有 ' + left
+          + (paused > 0 ? '，' + paused + ' 个会话等待续跑' : '')
+          + '\n点击：' + (wait ? '关闭等待（谷期、峰期都照常跑）' : '开启等待（峰期会自动停）'),
+      };
+    }
+
+    function paint() {
+      if (!button) return;
+      const next = view();
+      if (button.textContent !== next.label) button.textContent = next.label;
+      if (button.title !== next.title) button.title = next.title;
+      if (button.style.color !== next.color) button.style.color = next.color;
+      if (button.style.borderColor !== next.edge) button.style.borderColor = next.edge;
+      const background = next.background;
+      if (button.style.background !== background) button.style.background = background;
     }
 
     async function onClick(event) {
@@ -76,13 +120,27 @@ window.__ModuleLoader__.load({
       event.stopPropagation();
       if (busy) return;
       busy = true;
+      const wait = !state || state.waitOffPeak !== false;
+      const phase = state && state.phase === 'peak' ? 'peak' : 'valley';
+      paint();
       try {
-        const phase = state && state.phase === 'peak' ? 'peak' : 'valley';
-        const wait = !state || state.waitOffPeak !== false;
-        if (phase === 'peak' && wait) await act('resume-now', {});
-        else await act('toggle', { waitOffPeak: !wait });
+        if (wait) {
+          const after = await act('toggle', { waitOffPeak: false });
+          setState(after);
+          if (phase === 'peak') {
+            const result = await act('resume-now', {});
+            setState(result);
+            setFlash('已继续 ' + (result && result.resumed ? result.resumed : 0) + ' 个', true);
+          } else {
+            setFlash('已关闭等待', false);
+          }
+        } else {
+          const after = await act('toggle', { waitOffPeak: true });
+          setState(after);
+          setFlash('已开启等待', true);
+        }
       } catch (error) {
-        /* 失败就保持原样，下次刷新再说 */
+        setFlash('操作失败', false);
       } finally {
         busy = false;
         paint();
@@ -95,11 +153,11 @@ window.__ModuleLoader__.load({
       node.setAttribute(MARK, '1');
       node.style.cssText = [
         'display:inline-flex', 'align-items:center', 'justify-content:center',
-        'height:28px', 'min-width:34px', 'padding:0 8px', 'margin-right:6px',
+        'height:28px', 'min-width:36px', 'padding:0 8px', 'margin-right:6px',
         'font-size:12px', 'line-height:1', 'font-variant-numeric:tabular-nums',
         'border-radius:8px', 'border:1px solid rgba(127,127,127,.3)',
         'background:transparent', 'cursor:pointer', 'user-select:none',
-        'white-space:nowrap', 'color:inherit',
+        'white-space:nowrap', 'color:inherit', 'transition:background .15s, color .15s, border-color .15s',
       ].join(';');
       node.addEventListener('click', onClick);
       return node;
@@ -122,7 +180,8 @@ window.__ModuleLoader__.load({
       try {
         const host = locateHost();
         if (!host) return;
-        if (host.querySelector('[' + MARK + ']')) { button = host.querySelector('[' + MARK + ']'); return; }
+        const existing = host.querySelector('[' + MARK + ']');
+        if (existing) { button = existing; return; }
         button = createButton();
         host.insertBefore(button, host.firstChild);
         paint();
